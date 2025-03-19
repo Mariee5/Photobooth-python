@@ -82,42 +82,22 @@ def play_shutter_sound():
     except:
         pass
 
-def capture_photos(num_photos=3, delay=3, black_white=False, selected_filter="Original"):
-    photos = []
-    analysis_results = []
-    cap = st.camera_input('Take your photos!')
-    if cap is not None:
-        preview_placeholder = st.empty()
-        status_placeholder = st.empty()
-        preview_placeholder.image(cap, caption='Preview')
-        status_placeholder.success('Photo captured!')
-        
-        # Analyze face
-        analysis = analyze_face(cap)
-        if analysis:
-            analysis_results.append(analysis)
-            update_emotion_data(analysis['emotion'])
-        
-        if black_white:
-            cap = ImageOps.grayscale(cap)
-        
-        # Apply selected filter
-        cap = apply_filter(cap, selected_filter)
-        
-        # Add frame
-        cap = add_frame(cap)
-        play_shutter_sound()
-        
-        photos.append(cap)
-        
-        if analysis:
-            emotions = analysis['emotion']
-            dominant_emotion = max(emotions.items(), key=lambda x: x[1])[0]
-            status_placeholder.info(f"Dominant emotion in photo: {dominant_emotion}")
-        
+def upload_photos():
+    # Photo upload section
+    uploaded_files = st.file_uploader('Upload your photos', type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+    if uploaded_files:
+        photos = []
+        analysis_results = []
+        for uploaded_file in uploaded_files:
+            image = Image.open(uploaded_file)
+            photos.append(image)
+            # Analyze face
+            analysis = analyze_face(image)
+            if analysis:
+                analysis_results.append(analysis)
+                update_emotion_data(analysis['emotion'])
         return photos, analysis_results
-    else:
-        return None, None
+    return None, None
 
 def create_photo_strip(photos):
     if not photos:
@@ -260,7 +240,7 @@ def main():
     
     with col1:
         if st.button("Start Photoshoot! 📸"):
-            photos, analysis_results = capture_photos(black_white=black_white, selected_filter=selected_filter)
+            photos, analysis_results = upload_photos()
             
             if photos and analysis_results:
                 # Store photos with their emotions
