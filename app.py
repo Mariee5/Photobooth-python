@@ -1,7 +1,6 @@
 import streamlit as st
-import cv2
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter, ImageOps
 import time
 from io import BytesIO
 import os
@@ -10,42 +9,39 @@ from deepface import DeepFace
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-from skimage import filters, exposure
-import matplotlib.pyplot as plt
 
 # Initialize session state for storing emotion data
 if 'emotion_data' not in st.session_state:
     st.session_state.emotion_data = []
 
 def apply_filter(image, filter_name):
-    if len(image.shape) == 2:
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-    
-    img_float = image.astype(float) / 255.0
-    
     if filter_name == "Original":
         return image
     elif filter_name == "Sepia":
-        sepia_filter = np.array([[0.393, 0.769, 0.189],
-                               [0.349, 0.686, 0.168],
-                               [0.272, 0.534, 0.131]])
-        sepia_img = cv2.transform(image, sepia_filter)
-        sepia_img = np.clip(sepia_img, 0, 255).astype(np.uint8)
-        return sepia_img
+        width, height = image.size
+        pixels = image.load()
+        for x in range(width):
+            for y in range(height):
+                r, g, b = pixels[x, y]
+                r = int(r * 0.393 + g * 0.769 + b * 0.189)
+                g = int(r * 0.349 + g * 0.686 + b * 0.168)
+                b = int(r * 0.272 + g * 0.534 + b * 0.131)
+                pixels[x, y] = (r, g, b)
+        return image
     elif filter_name == "Vintage":
-        vintage = cv2.applyColorMap(image, cv2.COLORMAP_BONE)
-        return vintage
+        image = ImageOps.grayscale(image)
+        enhancer = ImageEnhance.Color(image)
+        return enhancer.enhance(0.5)
     elif filter_name == "Cool":
-        cool = cv2.applyColorMap(image, cv2.COLORMAP_COOL)
-        return cool
+        image = ImageOps.grayscale(image)
+        enhancer = ImageEnhance.Color(image)
+        return enhancer.enhance(1.5)
     elif filter_name == "Summer":
-        summer = exposure.adjust_gamma(img_float, 1.2)
-        summer = exposure.adjust_sigmoid(summer, cutoff=0.5, gain=10)
-        return (summer * 255).astype(np.uint8)
+        enhancer = ImageEnhance.Brightness(image)
+        return enhancer.enhance(1.2)
     elif filter_name == "Dramatic":
-        dramatic = exposure.adjust_gamma(img_float, 2.0)
-        dramatic = filters.unsharp_mask(dramatic, radius=2, amount=2)
-        return (dramatic * 255).astype(np.uint8)
+        enhancer = ImageEnhance.Contrast(image)
+        return enhancer.enhance(1.5)
     return image
 
 def analyze_face(image):
@@ -73,12 +69,9 @@ def plot_emotions(emotions):
     st.pyplot(plt)
 
 def add_frame(image, frame_width=50):
-    if len(image.shape) == 2:
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-    
-    h, w = image.shape[:2]
-    framed = np.ones((h + 2*frame_width, w + 2*frame_width, 3), dtype=np.uint8) * 255
-    framed[frame_width:h+frame_width, frame_width:w+frame_width] = image
+    width, height = image.size
+    framed = Image.new('RGB', (width + 2*frame_width, height + 2*frame_width), (255, 255, 255))
+    framed.paste(image, (frame_width, frame_width))
     return framed
 
 def play_shutter_sound():
@@ -106,8 +99,7 @@ def capture_photos(num_photos=3, delay=3, black_white=False, selected_filter="Or
             update_emotion_data(analysis['emotion'])
         
         if black_white:
-            cap = cv2.cvtColor(cap, cv2.COLOR_RGB2GRAY)
-            cap = cv2.cvtColor(cap, cv2.COLOR_GRAY2RGB)
+            cap = ImageOps.grayscale(cap)
         
         # Apply selected filter
         cap = apply_filter(cap, selected_filter)
@@ -132,24 +124,20 @@ def create_photo_strip(photos):
         return None
     
     padding = 20
-    photo_height = photos[0].shape[0]
-    photo_width = photos[0].shape[1]
+    photo_height = photos[0].size[1]
+    photo_width = photos[0].size[0]
     
     # Add extra space at bottom for date
     date_height = 40
     strip_height = (photo_height * len(photos)) + (padding * (len(photos) - 1)) + date_height
     
-    strip = np.ones((strip_height, photo_width, 3), dtype=np.uint8) * 255
+    strip = Image.new('RGB', (photo_width, strip_height), (255, 255, 255))
     
     # Add photos
     for i, photo in enumerate(photos):
         y_start = i * (photo_height + padding)
         y_end = y_start + photo_height
-        strip[y_start:y_end] = photo
-    
-    # Convert to PIL Image to add date text
-    strip_pil = Image.fromarray(strip)
-    draw = ImageDraw.Draw(strip_pil)
+        strip.paste(photo, (0, y_start))
     
     # Add date at the bottom
     current_date = datetime.now().strftime("%B %d, %Y")
@@ -160,14 +148,14 @@ def create_photo_strip(photos):
         font = ImageFont.load_default()
     
     # Get text size and center it
-    text_bbox = draw.textbbox((0, 0), current_date, font=font)
+    text_bbox = ImageDraw.Draw(strip).textbbox((0, 0), current_date, font=font)
     text_width = text_bbox[2] - text_bbox[0]
     text_x = (photo_width - text_width) // 2
     text_y = strip_height - date_height + 10
     
-    draw.text((text_x, text_y), current_date, fill=(100, 100, 100), font=font)
+    ImageDraw.Draw(strip).text((text_x, text_y), current_date, fill=(100, 100, 100), font=font)
     
-    return np.array(strip_pil)
+    return strip
 
 def main():
     st.set_page_config(
@@ -292,9 +280,8 @@ def main():
                     st.image(photo_strip, caption="Your Photo Strip")
                     
                     # Convert to PIL Image for saving
-                    pil_image = Image.fromarray(photo_strip)
                     buf = BytesIO()
-                    pil_image.save(buf, format="PNG")
+                    photo_strip.save(buf, format="PNG")
                     
                     # Download button
                     st.download_button(
@@ -316,9 +303,9 @@ def main():
                         item = st.session_state.photos_with_emotions[i + j]
                         with cols[j]:
                             # Resize photo for thumbnail
-                            photo = Image.fromarray(item['photo'])
+                            photo = item['photo'].copy()
                             photo.thumbnail((200, 200))
-                            st.image(np.array(photo), caption=f"{item['emotion'].title()}")
+                            st.image(photo, caption=f"{item['emotion'].title()}")
         else:
             st.info("Take some photos to see them here!")
         
